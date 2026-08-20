@@ -51,7 +51,7 @@ def get_hermes_status():
     projects_db_path = os.path.join(HERMES_DIR, "projects.db")
     if os.path.exists(projects_db_path):
         try:
-            conn = sqlite3.connect(projects_db_path)
+            conn = sqlite3.connect(projects_db_path, timeout=5)
             cur = conn.cursor()
             cur.execute("SELECT id, slug, name, primary_path, archived FROM projects")
             for row in cur.fetchall():
@@ -86,10 +86,10 @@ def get_hermes_status():
 
     # 6. Check crontab
     try:
-        res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        res = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
         if res.returncode == 0:
             for line in res.stdout.splitlines():
-                if "backup_hermes.sh" in line or "Hermes_Backups" in line or "Hermes-Backup" in line:
+                if "backup" in line and ("Hermes" in line or "hermes" in line):
                     status["crontab_schedule"] = line.strip()
                     break
     except Exception:
@@ -160,7 +160,7 @@ def execute_live_backup(payload):
         logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 📦 正在執行 hermes backup 核心打包...")
         core_zip = os.path.join(core_dir, f"hermes_core_{timestamp}.zip")
         try:
-            res = subprocess.run(["hermes", "backup", "-o", core_zip], capture_output=True, text=True)
+            res = subprocess.run(["hermes", "backup", "-o", core_zip], capture_output=True, text=True, timeout=120)
             if res.returncode == 0:
                 logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 核心資料庫與設定檔打包成功 ({round(os.path.getsize(core_zip)/(1024*1024), 2)} MB)")
             else:
@@ -205,7 +205,7 @@ def execute_live_backup(payload):
             tar_cmd.extend(["-czf", tar_name, "-C", parent_dir, base_name])
             
             try:
-                subprocess.run(tar_cmd, check=True)
+                subprocess.run(tar_cmd, check=True, timeout=120)
                 size_mb = round(os.path.getsize(tar_name) / (1024 * 1024), 2)
                 logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 專案 [{slug}] 封裝完成 ({size_mb} MB)")
             except Exception as e:
@@ -238,7 +238,6 @@ def execute_live_restore(payload):
     """Executes live restore from a chosen backup folder."""
     backup_id = payload.get("backup_id")
     if not backup_id:
-        # choose latest
         backups = get_backup_list()
         if not backups:
             return {"success": False, "error": "沒有可用的歷史備份封裝"}
@@ -254,7 +253,7 @@ def execute_live_restore(payload):
     # 1. Emergency safety snapshot
     logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 🛡️ 正在建立還原前緊急快照 (Pre-Restore Rollback Snapshot)...")
     try:
-        subprocess.run(["hermes", "backup", "--quick", "-l", "pre-restore-emergency"], capture_output=True, text=True)
+        subprocess.run(["hermes", "backup", "--quick", "-l", "pre-restore-emergency"], capture_output=True, text=True, timeout=60)
         logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 緊急回滾點已成功儲存")
     except Exception as e:
         logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 建立快照失敗 (繼續執行): {e}")
@@ -265,7 +264,7 @@ def execute_live_restore(payload):
         core_zip = core_zips[0]
         logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 📦 正在從 {os.path.basename(core_zip)} 還原 state.db 與系統設定...")
         try:
-            res = subprocess.run(["hermes", "import", core_zip, "--force"], capture_output=True, text=True)
+            res = subprocess.run(["hermes", "import", core_zip, "--force"], capture_output=True, text=True, timeout=120)
             if res.returncode == 0:
                 logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 核心狀態匯入成功")
             else:
@@ -276,7 +275,7 @@ def execute_live_restore(payload):
     # 3. Doctor verification
     logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 🩺 執行 Hermes Doctor 診斷...")
     try:
-        doc_res = subprocess.run(["hermes", "doctor"], capture_output=True, text=True)
+        subprocess.run(["hermes", "doctor"], capture_output=True, text=True, timeout=30)
         logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 系統相依性與環境校驗完成")
     except Exception:
         pass
@@ -286,7 +285,7 @@ def execute_live_restore(payload):
 
 def configure_schedule(payload):
     """Sets crontab and/or Hermes cron for periodic backup."""
-    frequency = payload.get("frequency", "daily") # hourly, daily, weekly, custom
+    frequency = payload.get("frequency", "daily")
     custom_cron = payload.get("custom_cron", "0 3 * * *")
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "backup.sh")
     
@@ -306,21 +305,21 @@ def configure_schedule(payload):
     # Update macOS Crontab
     try:
         curr_crontab = ""
-        res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        res = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
         if res.returncode == 0:
-            lines = [l for l in res.stdout.splitlines() if "backup.sh" not in l and "backup_hermes" not in l and "Hermes_Backups" not in l]
+            lines = [l for l in res.stdout.splitlines() if "backup" not in l and "Hermes" not in l]
             curr_crontab = "\n".join(lines)
         
         if cron_expr:
             new_entry = f"{cron_expr} /bin/bash {script_path} >> {BACKUP_BASE_DIR}/backup.log 2>&1"
             final_crontab = (curr_crontab + "\n" + new_entry).strip() + "\n"
             p = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            p.communicate(input=final_crontab)
+            p.communicate(input=final_crontab, timeout=5)
             logs.append(f"✅ 已成功更新 macOS Crontab 排程: [{cron_expr}]")
         else:
             final_crontab = curr_crontab.strip() + "\n" if curr_crontab.strip() else ""
             p = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            p.communicate(input=final_crontab)
+            p.communicate(input=final_crontab, timeout=5)
             logs.append("ℹ️ 已取消 macOS Crontab 定期備份排程")
     except Exception as e:
         logs.append(f"❌ 設定 Crontab 失敗: {e}")
@@ -334,11 +333,11 @@ def git_sync(payload):
     
     logs = []
     try:
-        subprocess.run(["git", "add", "."], cwd=repo_dir, check=True)
-        subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_dir, capture_output=True, text=True)
+        subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, timeout=10)
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_dir, capture_output=True, text=True, timeout=10)
         logs.append("✅ Git 本地變更已 Commit")
         
-        res = subprocess.run(["git", "push", "origin", "main"], cwd=repo_dir, capture_output=True, text=True)
+        res = subprocess.run(["git", "push", "origin", "main"], cwd=repo_dir, capture_output=True, text=True, timeout=30)
         if res.returncode == 0:
             logs.append("🚀 已成功推送 (git push) 至 GitHub: HowardLiao/Hermes-Backup")
         else:
@@ -418,12 +417,15 @@ class HermesBackupHTTPHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
 
+class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
 def run_server():
-    server_address = ("", PORT)
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(server_address, HermesBackupHTTPHandler) as httpd:
-        print(f"🌟 Hermes Backup Control Server listening on http://localhost:{PORT}")
-        httpd.serve_forever()
+    server_address = ("127.0.0.1", PORT)
+    httpd = ThreadedHTTPServer(server_address, HermesBackupHTTPHandler)
+    print(f"🌟 Hermes Backup Control Server listening on http://127.0.0.1:{PORT}")
+    httpd.serve_forever()
 
 if __name__ == "__main__":
     run_server()
