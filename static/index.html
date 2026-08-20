@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermes Agent 專案備份與還原管理控制台</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        obsidian: '#020617',
+                        slateCard: '#0f172a',
+                        cardBorder: '#1e293b',
+                        accentCyan: '#06b6d4',
+                        accentIndigo: '#6366f1',
+                        accentEmerald: '#10b981',
+                        accentRose: '#f43f5e',
+                        accentAmber: '#f59e0b'
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'Fira Code', 'Menlo', 'monospace'],
+                        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        
+        body {
+            background-color: #020617;
+            color: #f8fafc;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.08) 0px, transparent 50%);
+            background-attachment: fixed;
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .glass-panel:hover {
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+
+        .terminal-scroll::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .terminal-scroll::-webkit-scrollbar-track {
+            background: #020617;
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+
+        .tab-btn.active {
+            color: #06b6d4;
+            border-bottom: 2px solid #06b6d4;
+            background: rgba(6, 182, 212, 0.06);
+        }
+
+        .pulse-dot {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .4; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-cyan-500 selection:text-white">
+
+    <!-- Top Navigation -->
+    <header class="border-b border-slate-800 bg-slate-950/80 sticky top-0 z-50 backdrop-blur-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 via-cyan-500 to-emerald-400 p-0.5 flex items-center justify-center">
+                    <div class="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
+                        <i data-lucide="shield-check" class="w-5 h-5 text-cyan-400"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-100">Hermes Backup & Disaster Recovery</h1>
+                        <span class="px-2 py-0.5 text-[11px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full">v3.1 Production</span>
+                    </div>
+                    <p class="text-xs text-slate-400">一鍵備份、災難復原、週期排程與 GitHub 雲端同步控制台</p>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="flex items-center space-x-3">
+                <div id="live-indicator" class="hidden sm:flex items-center space-x-2 text-xs px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
+                    <span id="daemon-status-text">本機 API Daemon 運行中</span>
+                </div>
+                <button onclick="triggerGitHubSync()" id="btn-sync-gh" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 border border-slate-700 transition">
+                    <i data-lucide="github" class="w-3.5 h-3.5 text-cyan-400"></i>
+                    <span>同步 GitHub</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+        <!-- Bento Grid Summary -->
+        <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- Card 1: Projects -->
+            <div class="glass-panel p-5 rounded-2xl flex flex-col justify-between">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">專案工作區清冊</span>
+                    <div class="p-2 rounded-lg bg-cyan-500/10 text-cyan-400">
+                        <i data-lucide="folder-git-2" class="w-4 h-4"></i>
+                    </div>
+                </div>
+                <div class="my-3">
+                    <div id="stat-projects-count" class="text-2xl font-bold text-white font-mono">--</div>
+                    <div id="stat-projects-list" class="text-xs text-slate-400 mt-1 truncate">正在讀取 projects.db...</div>
+                </div>
+                <div class="text-[11px] text-cyan-400 flex items-center space-x-1">
+                    <i data-lucide="check" class="w-3 h-3"></i>
+                    <span>已完成實體資料夾對齊</span>
+                </div>
+            </div>
+
+            <!-- Card 2: Core DB -->
+            <div class="glass-panel p-5 rounded-2xl flex flex-col justify-between">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">核心對話資料庫</span>
+                    <div class="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
+                        <i data-lucide="database" class="w-4 h-4"></i>
+                    </div>
+                </div>
+                <div class="my-3">
+                    <div id="stat-state-size" class="text-2xl font-bold text-white font-mono">-- MB</div>
+                    <div class="text-xs text-slate-400 mt-1">state.db (FTS5) • kanban.db</div>
+                </div>
+                <div id="stat-skills-count" class="text-[11px] text-indigo-400 flex items-center space-x-1">
+                    <i data-lucide="sparkles" class="w-3 h-3"></i>
+                    <span>包含自訂技能與對話記憶</span>
+                </div>
+            </div>
+
+            <!-- Card 3: Periodic Schedule Status -->
+            <div class="glass-panel p-5 rounded-2xl flex flex-col justify-between">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">週期備份排程 (Schedule)</span>
+                    <div class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+                        <i data-lucide="clock" class="w-4 h-4"></i>
+                    </div>
+                </div>
+                <div class="my-3">
+                    <div id="stat-schedule" class="text-lg font-bold text-emerald-400 font-mono truncate">未設定</div>
+                    <div class="text-xs text-slate-400 mt-1">macOS Crontab 自動執行</div>
+                </div>
+                <div class="text-[11px] text-slate-400 flex items-center space-x-1">
+                    <i data-lucide="shield" class="w-3 h-3 text-emerald-400"></i>
+                    <span>支援自動輪替保留 7 天快照</span>
+                </div>
+            </div>
+
+            <!-- Card 4: Last Backup -->
+            <div class="glass-panel p-5 rounded-2xl flex flex-col justify-between">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">最新備份快照</span>
+                    <div class="p-2 rounded-lg bg-rose-500/10 text-rose-400">
+                        <i data-lucide="archive" class="w-4 h-4"></i>
+                    </div>
+                </div>
+                <div class="my-3">
+                    <div id="stat-last-backup-time" class="text-sm font-bold text-white font-mono truncate">尚無紀錄</div>
+                    <div id="stat-backups-total" class="text-xs text-slate-400 mt-1">共有 0 份歷史備份封裝</div>
+                </div>
+                <div class="text-[11px] text-rose-400 flex items-center space-x-1">
+                    <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                    <span>支援 Pre-flight 原子還原</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Navigation Tabs -->
+        <div class="border-b border-slate-800 flex space-x-2 overflow-x-auto">
+            <button onclick="switchTab('backup')" id="tab-backup" class="tab-btn active px-4 py-3 text-sm font-medium transition flex items-center space-x-2 whitespace-nowrap">
+                <i data-lucide="zap" class="w-4 h-4"></i>
+                <span>1. 一鍵備份控制台 (1-Click Backup)</span>
+            </button>
+            <button onclick="switchTab('restore')" id="tab-restore" class="tab-btn px-4 py-3 text-sm font-medium text-slate-400 hover:text-slate-200 transition flex items-center space-x-2 whitespace-nowrap">
+                <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                <span>2. 一鍵災難復原 (Disaster Restore)</span>
+            </button>
+            <button onclick="switchTab('schedule')" id="tab-schedule" class="tab-btn px-4 py-3 text-sm font-medium text-slate-400 hover:text-slate-200 transition flex items-center space-x-2 whitespace-nowrap">
+                <i data-lucide="calendar" class="w-4 h-4"></i>
+                <span>3. 週期性排程設定 (Periodic Backup)</span>
+            </button>
+            <button onclick="switchTab('history')" id="tab-history" class="tab-btn px-4 py-3 text-sm font-medium text-slate-400 hover:text-slate-200 transition flex items-center space-x-2 whitespace-nowrap">
+                <i data-lucide="history" class="w-4 h-4"></i>
+                <span>4. 備份歷史與快照 (Snapshots Matrix)</span>
+            </button>
+        </div>
+
+        <!-- TAB 1: ONE-CLICK BACKUP -->
+        <section id="pane-backup" class="space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <!-- Left Options -->
+                <div class="lg:col-span-5 space-y-6">
+                    <div class="glass-panel p-6 rounded-2xl space-y-5">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+                                <i data-lucide="sliders" class="w-4 h-4 text-cyan-400"></i>
+                                <span>備份範圍勾選</span>
+                            </h2>
+                            <span class="text-[11px] text-slate-400">即點即備份</span>
+                        </div>
+
+                        <!-- Options Checkboxes -->
+                        <div class="space-y-3">
+                            <label class="flex items-start space-x-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition">
+                                <input type="checkbox" id="chk-core" checked class="mt-1 rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
+                                <div>
+                                    <div class="text-sm font-medium text-slate-200">Hermes 核心狀態與資料庫</div>
+                                    <div class="text-xs text-slate-400">state.db (~140MB 對話記錄), projects.db, kanban.db, config.yaml</div>
+                                </div>
+                            </label>
+
+                            <label class="flex items-start space-x-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition">
+                                <input type="checkbox" id="chk-skills" checked class="mt-1 rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
+                                <div>
+                                    <div class="text-sm font-medium text-slate-200">自訂技能庫 (Custom Skills)</div>
+                                    <div class="text-xs text-slate-400">~/.hermes/skills/ (所有自訂工作流程與自動化腳本)</div>
+                                </div>
+                            </label>
+
+                            <label class="flex items-start space-x-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition">
+                                <input type="checkbox" id="chk-memories" checked class="mt-1 rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
+                                <div>
+                                    <div class="text-sm font-medium text-slate-200">持久化記憶庫 (Memories)</div>
+                                    <div class="text-xs text-slate-400">~/.hermes/memories/ 及 SOUL.md 使用者偏好檔案</div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <!-- Projects Checkboxes -->
+                        <div class="space-y-3 pt-3 border-t border-slate-800">
+                            <label class="text-xs font-semibold text-slate-300 uppercase tracking-wider">實體專案工作區目錄 (Workspaces)</label>
+                            <div id="projects-checkbox-container" class="space-y-2">
+                                <div class="text-xs text-slate-500">正在加載專案...</div>
+                            </div>
+                        </div>
+
+                        <!-- Advanced Settings -->
+                        <div class="space-y-3 pt-3 border-t border-slate-800 text-xs">
+                            <label class="flex items-center space-x-2 text-slate-300">
+                                <input type="checkbox" id="chk-exclude-heavy" checked class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
+                                <span>自動排除大型快取檔 (node_modules, .venv, __pycache__)</span>
+                            </label>
+                            <div class="flex items-center justify-between text-slate-400 pt-1">
+                                <span>保留歷史備份份數：</span>
+                                <input type="number" id="input-retention" value="7" min="1" max="30" class="w-16 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-center font-mono text-slate-200">
+                            </div>
+                        </div>
+
+                        <!-- One Click Execute Button -->
+                        <button onclick="triggerOneClickBackup()" id="btn-execute-backup" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-600 via-indigo-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 flex items-center justify-center space-x-2 transition transform active:scale-98">
+                            <i data-lucide="play-circle" class="w-5 h-5"></i>
+                            <span id="btn-backup-label">⚡ 點擊立即執行完整備份 (One-Click Backup)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Terminal & Logs -->
+                <div class="lg:col-span-7 space-y-6">
+                    <div class="glass-panel p-6 rounded-2xl space-y-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <div class="flex space-x-1.5">
+                                    <div class="w-2.5 h-2.5 rounded-full bg-rose-500/80"></div>
+                                    <div class="w-2.5 h-2.5 rounded-full bg-amber-500/80"></div>
+                                    <div class="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></div>
+                                </div>
+                                <span class="text-xs font-mono text-slate-400 ml-2">即時備份執行監控主控台 (Live Execution Console)</span>
+                            </div>
+                            <span id="backup-status-badge" class="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] text-slate-400 font-mono">IDLE</span>
+                        </div>
+
+                        <div id="backup-terminal" class="bg-slate-950 p-4 rounded-xl font-mono text-xs text-slate-300 h-80 overflow-y-auto terminal-scroll space-y-1.5 border border-slate-850">
+                            <div class="text-slate-500">[Console] 點擊左側「⚡ 點擊立即執行完整備份」按鈕，系統將即時調用 Hermes 核心進行真設備份並串流輸出 Log...</div>
+                        </div>
+
+                        <!-- Progress Bar -->
+                        <div class="space-y-1.5">
+                            <div class="flex justify-between text-[11px] text-slate-400">
+                                <span>備份進度</span>
+                                <span id="backup-pct" class="font-mono text-cyan-400">0%</span>
+                            </div>
+                            <div class="w-full bg-slate-900 rounded-full h-2 overflow-hidden">
+                                <div id="backup-progress-bar" class="bg-gradient-to-r from-cyan-500 via-indigo-500 to-emerald-400 h-full w-0 transition-all duration-300"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: ONE-CLICK RESTORE -->
+        <section id="pane-restore" class="hidden space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <!-- Left Options -->
+                <div class="lg:col-span-5 space-y-6">
+                    <div class="glass-panel p-6 rounded-2xl space-y-5">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+                                <i data-lucide="rotate-ccw" class="w-4 h-4 text-emerald-400"></i>
+                                <span>災難復原來源選擇</span>
+                            </h2>
+                            <span class="text-[11px] text-slate-400">原子化還原</span>
+                        </div>
+
+                        <div class="space-y-2">
+                            <label class="text-xs font-semibold text-slate-300 uppercase tracking-wider">選擇欲還原的歷史快照版本</label>
+                            <select id="select-restore-snapshot" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500">
+                                <option value="">最新備份 (Auto Latest)</option>
+                            </select>
+                        </div>
+
+                        <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                            <div class="text-xs font-semibold text-emerald-400 flex items-center space-x-1.5">
+                                <i data-lucide="shield" class="w-3.5 h-3.5"></i>
+                                <span>100% 安全回滾保障 (Rollback Safe)</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 leading-relaxed">
+                                系統在執行還原前，會自動先建立當前環境之緊急快照 (`state.db.pre-restore-emergency.bak`)，確保隨時可退回還原前狀態。
+                            </p>
+                        </div>
+
+                        <button onclick="triggerOneClickRestore()" id="btn-execute-restore" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-sm shadow-lg shadow-emerald-500/20 flex items-center justify-center space-x-2 transition transform active:scale-98">
+                            <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+                            <span id="btn-restore-label">🔄 點擊立即執行災難復原 (One-Click Restore)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Terminal -->
+                <div class="lg:col-span-7 space-y-6">
+                    <div class="glass-panel p-6 rounded-2xl space-y-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <div class="flex space-x-1.5">
+                                    <div class="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></div>
+                                    <div class="w-2.5 h-2.5 rounded-full bg-cyan-500/80"></div>
+                                    <div class="w-2.5 h-2.5 rounded-full bg-indigo-500/80"></div>
+                                </div>
+                                <span class="text-xs font-mono text-slate-400 ml-2">還原執行紀錄與診斷</span>
+                            </div>
+                            <span id="restore-status-badge" class="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] text-slate-400 font-mono">IDLE</span>
+                        </div>
+
+                        <div id="restore-terminal" class="bg-slate-950 p-4 rounded-xl font-mono text-xs text-slate-300 h-80 overflow-y-auto terminal-scroll space-y-1.5 border border-slate-850">
+                            <div class="text-slate-500">[Console] 點擊「🔄 點擊立即執行災難復原」開始執行系統回滾與狀態匯入...</div>
+                        </div>
+
+                        <div class="space-y-1.5">
+                            <div class="flex justify-between text-[11px] text-slate-400">
+                                <span>還原進度</span>
+                                <span id="restore-pct" class="font-mono text-emerald-400">0%</span>
+                            </div>
+                            <div class="w-full bg-slate-900 rounded-full h-2 overflow-hidden">
+                                <div id="restore-progress-bar" class="bg-gradient-to-r from-emerald-500 to-cyan-400 h-full w-0 transition-all duration-300"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: PERIODIC SCHEDULE CONFIG -->
+        <section id="pane-schedule" class="hidden space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div class="lg:col-span-6 space-y-6">
+                    <div class="glass-panel p-6 rounded-2xl space-y-5">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+                                <i data-lucide="clock" class="w-4 h-4 text-cyan-400"></i>
+                                <span>設定週期性定時備份頻率</span>
+                            </h2>
+                            <span class="text-xs text-emerald-400 font-mono">macOS Crontab</span>
+                        </div>
+
+                        <p class="text-xs text-slate-400 leading-relaxed">
+                            選擇您偏好的自動化備份週期。點擊儲存後，系統將自動寫入 macOS Crontab 排程，無需保持瀏覽器開啟。
+                        </p>
+
+                        <!-- Frequency Presets -->
+                        <div class="space-y-2.5">
+                            <label class="flex items-start space-x-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition">
+                                <input type="radio" name="schedule-freq" value="daily" checked class="mt-1 text-cyan-500 focus:ring-0">
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-sm font-semibold text-slate-200">🌙 每日備份 (Daily at 03:00 AM) - 推薦</span>
+                                        <span class="text-xs font-mono text-cyan-400">0 3 * * *</span>
+                                    </div>
+                                    <p class="text-xs text-slate-400 mt-0.5">每天凌晨自動打包 Hermes 核心與專案，保留最近 7 天歷史紀錄</p>
+                                </div>
+                            </label>
+
+                            <label class="flex items-start space-x-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition">
+                                <input type="radio" name="schedule-freq" value="hourly" class="mt-1 text-cyan-500 focus:ring-0">
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-sm font-semibold text-slate-200">⚡ 每小時備份 (Hourly)</span>
+                                        <span class="text-xs font-mono text-indigo-400">0 * * * *</span>
+                                    </div>
+                                    <p class="text-xs text-slate-400 mt-0.5">高頻度開發時使用，確保對話與工作區極致零損失 (RPO &lt; 1h)</p>
+                                </div>
+                            </label>
+
+                            <label class="flex items-start space-x-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition">
+                                <input type="radio" name="schedule-freq" value="weekly" class="mt-1 text-cyan-500 focus:ring-0">
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-sm font-semibold text-slate-200">📅 每週日備份 (Weekly Sunday 03:00 AM)</span>
+                                        <span class="text-xs font-mono text-emerald-400">0 3 * * 0</span>
+                                    </div>
+                                    <p class="text-xs text-slate-400 mt-0.5">低頻度備份，節省硬碟儲存空間</p>
+                                </div>
+                            </label>
+
+                            <label class="flex items-start space-x-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition">
+                                <input type="radio" name="schedule-freq" value="custom" class="mt-1 text-cyan-500 focus:ring-0">
+                                <div class="flex-1">
+                                    <div class="text-sm font-semibold text-slate-200">⚙️ 自訂 Cron 表達式 (Custom Cron)</div>
+                                    <input type="text" id="input-custom-cron" value="30 2 * * *" placeholder="分 時 日 月 週" class="w-full mt-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-cyan-300">
+                                </div>
+                            </label>
+
+                            <label class="flex items-start space-x-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition">
+                                <input type="radio" name="schedule-freq" value="disabled" class="mt-1 text-rose-500 focus:ring-0">
+                                <div class="flex-1">
+                                    <div class="text-sm font-semibold text-rose-300">🛑 關閉自動定時備份 (Disabled)</div>
+                                    <p class="text-xs text-slate-400">僅使用手動一鍵備份按鈕</p>
+                                </div>
+                            </label>
+                        </div>
+
+                        <!-- Save Schedule Button -->
+                        <button onclick="saveSchedule()" id="btn-save-schedule" class="w-full py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-lg shadow-cyan-600/20 flex items-center justify-center space-x-2 transition">
+                            <i data-lucide="save" class="w-4 h-4"></i>
+                            <span>儲存並啟用週期備份排程 (Save Schedule)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Schedule Info -->
+                <div class="lg:col-span-6 space-y-6">
+                    <div class="glass-panel p-6 rounded-2xl space-y-4">
+                        <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+                            <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>
+                            <span>目前系統排程狀態 (Active Crontab)</span>
+                        </h3>
+
+                        <div class="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                            <div class="text-[11px] text-slate-400 mb-1">本機 Crontab 正在執行的指令：</div>
+                            <pre id="current-crontab-display" class="text-xs font-mono text-cyan-400 overflow-x-auto terminal-scroll">尚未設定任何定時排程</pre>
+                        </div>
+
+                        <div class="space-y-2 text-xs text-slate-400 leading-relaxed">
+                            <div class="flex items-center space-x-2 text-slate-300">
+                                <i data-lucide="info" class="w-4 h-4 text-cyan-400"></i>
+                                <span class="font-medium">運作機制說明：</span>
+                            </div>
+                            <ul class="list-disc pl-5 space-y-1 text-[11px]">
+                                <li>自動排程由 macOS 系統級 <code>crontab</code> 守護程序觸發。</li>
+                                <li>每次執行均會將完整 Output 寫入 <code>~/Hermes_Backups/backup.log</code>。</li>
+                                <li>自動檢測並清理超過保留限制（預設 7 天）的歷史舊資料夾。</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: SNAPSHOTS HISTORY MATRIX -->
+        <section id="pane-history" class="hidden space-y-6">
+            <div class="glass-panel p-6 rounded-2xl space-y-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="text-base font-bold text-white">歷史備份快照總覽 (Snapshots Archive)</h2>
+                        <p class="text-xs text-slate-400 mt-1">儲存於本機 ~/Hermes_Backups 目錄中之全量封裝</p>
+                    </div>
+                    <button onclick="refreshData()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 flex items-center space-x-1.5 border border-slate-700 transition">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-cyan-400"></i>
+                        <span>重新整理清單</span>
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs font-mono">
+                        <thead class="bg-slate-900/80 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
+                            <tr>
+                                <th class="p-3.5 font-sans">快照識別碼 (Backup ID)</th>
+                                <th class="p-3.5 font-sans">建立時間</th>
+                                <th class="p-3.5 font-sans">容量大小</th>
+                                <th class="p-3.5 font-sans">包含項目</th>
+                                <th class="p-3.5 font-sans text-right">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="backups-table-body" class="divide-y divide-slate-800/60">
+                            <tr>
+                                <td colspan="5" class="p-6 text-center text-slate-500">正在掃描備份資料夾...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800/80 bg-slate-950/60 py-6 mt-12 text-center text-xs text-slate-500">
+        <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center space-x-2">
+                <span>Hermes Agent Enterprise Backup & Disaster Recovery Suite</span>
+            </div>
+            <div class="text-slate-400 font-mono text-[11px]">
+                Built for High Availability & Zero Data Loss Governance
+            </div>
+        </div>
+    </footer>
+
+    <!-- Frontend Controller Scripts -->
+    <script>
+        lucide.createIcons();
+
+        let currentProjects = [];
+        let completedBackups = [];
+
+        // Tab Switching
+        function switchTab(tabId) {
+            const tabs = ['backup', 'restore', 'schedule', 'history'];
+            tabs.forEach(t => {
+                const btn = document.getElementById(`tab-${t}`);
+                const pane = document.getElementById(`pane-${t}`);
+                if (t === tabId) {
+                    btn.classList.add('active');
+                    btn.classList.remove('text-slate-400');
+                    pane.classList.remove('hidden');
+                } else {
+                    btn.classList.remove('active');
+                    btn.classList.add('text-slate-400');
+                    pane.classList.add('hidden');
+                }
+            });
+            lucide.createIcons();
+        }
+
+        // Fetch Live Status
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                
+                if (data.ok) {
+                    // Update Stats
+                    document.getElementById('stat-state-size').innerText = `${data.state_db_size_mb} MB`;
+                    document.getElementById('stat-projects-count').innerText = `${data.projects.length} 個專案`;
+                    document.getElementById('stat-skills-count').innerHTML = `<i data-lucide="sparkles" class="w-3 h-3"></i><span>包含 ${data.skills_count} 組技能與 ${data.memories_count} 筆記憶</span>`;
+                    
+                    const projNames = data.projects.map(p => p.name).join(' • ');
+                    document.getElementById('stat-projects-list').innerText = projNames || '無專案';
+                    document.getElementById('stat-backups-total').innerText = `共有 ${data.backups_count} 份歷史備份封裝`;
+
+                    if (data.last_backup) {
+                        document.getElementById('stat-last-backup-time').innerText = data.last_backup.created_at;
+                    } else {
+                        document.getElementById('stat-last-backup-time').innerText = '尚無備份快照';
+                    }
+
+                    if (data.crontab_schedule) {
+                        document.getElementById('stat-schedule').innerText = data.crontab_schedule.split(' ')[0] === '0' && data.crontab_schedule.split(' ')[1] === '3' ? '每日 03:00' : '已排程';
+                        document.getElementById('current-crontab-display').innerText = data.crontab_schedule;
+                    } else {
+                        document.getElementById('stat-schedule').innerText = '未排程';
+                        document.getElementById('current-crontab-display').innerText = '尚未設定任何定時排程 (建議勾選每日 03:00)';
+                    }
+
+                    // Render Projects Checkboxes
+                    currentProjects = data.projects;
+                    renderProjectCheckboxes(data.projects);
+                }
+            } catch (e) {
+                console.error("Fetch status error:", e);
+                document.getElementById('daemon-status-text').innerText = "離線模式 (靜態預覽)";
+                document.getElementById('live-indicator').classList.remove('bg-emerald-500/10', 'text-emerald-400', 'border-emerald-500/20');
+                document.getElementById('live-indicator').classList.add('bg-amber-500/10', 'text-amber-400', 'border-amber-500/20');
+            }
+            lucide.createIcons();
+        }
+
+        function renderProjectCheckboxes(projects) {
+            const container = document.getElementById('projects-checkbox-container');
+            if (!projects || projects.length === 0) {
+                container.innerHTML = '<div class="text-xs text-slate-500">未發現已註冊專案</div>';
+                return;
+            }
+
+            container.innerHTML = projects.map(p => `
+                <label class="flex items-start space-x-3 p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition">
+                    <input type="checkbox" value="${p.slug}" checked class="chk-project-item mt-1 rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-cyan-300 flex items-center justify-between">
+                            <span>${p.name}</span>
+                            <span class="text-[10px] text-slate-500 font-mono">${p.slug}</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 font-mono truncate" title="${p.primary_path}">${p.primary_path}</div>
+                    </div>
+                </label>
+            `).join('');
+        }
+
+        // Fetch Backups List
+        async function fetchBackups() {
+            try {
+                const res = await fetch('/api/backups');
+                const data = await res.json();
+                completedBackups = data.backups || [];
+                
+                // Update Restore Select
+                const select = document.getElementById('select-restore-snapshot');
+                select.innerHTML = '<option value="">最新備份 (Auto Latest Snapshot)</option>' + 
+                    completedBackups.map(b => `<option value="${b.dir_name}">${b.created_at} - ${b.dir_name} (${b.size_mb} MB)</option>`).join('');
+
+                // Update Table
+                const tbody = document.getElementById('backups-table-body');
+                if (completedBackups.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-500">尚無歷史備份封裝</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = completedBackups.map(b => `
+                    <tr class="hover:bg-slate-900/40 transition">
+                        <td class="p-3.5 font-sans font-medium text-slate-200 flex items-center space-x-2">
+                            <i data-lucide="archive" class="w-4 h-4 text-cyan-400"></i>
+                            <span>${b.dir_name}</span>
+                        </td>
+                        <td class="p-3.5 text-slate-400">${b.created_at}</td>
+                        <td class="p-3.5 text-emerald-400 font-bold">${b.size_mb} MB</td>
+                        <td class="p-3.5 text-slate-400 text-[11px]">
+                            ${b.manifest.include_core ? '<span class="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 mr-1">Core</span>' : ''}
+                            ${b.manifest.projects ? b.manifest.projects.map(p => `<span class="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 mr-1">${p}</span>`).join('') : ''}
+                        </td>
+                        <td class="p-3.5 text-right">
+                            <button onclick="quickRestore('${b.dir_name}')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition border border-slate-700">
+                                復原此版本
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+                lucide.createIcons();
+            } catch (e) {
+                console.error("Fetch backups error:", e);
+            }
+        }
+
+        // Trigger One-Click Backup
+        async function triggerOneClickBackup() {
+            const btn = document.getElementById('btn-execute-backup');
+            const term = document.getElementById('backup-terminal');
+            const pBar = document.getElementById('backup-progress-bar');
+            const pPct = document.getElementById('backup-pct');
+            const badge = document.getElementById('backup-status-badge');
+
+            const includeCore = document.getElementById('chk-core').checked;
+            const includeSkills = document.getElementById('chk-skills').checked;
+            const includeMemories = document.getElementById('chk-memories').checked;
+            const excludeHeavy = document.getElementById('chk-exclude-heavy').checked;
+            const retention = document.getElementById('input-retention').value;
+
+            const selectedProjects = [];
+            document.querySelectorAll('.chk-project-item:checked').forEach(cb => selectedProjects.push(cb.value));
+
+            btn.disabled = true;
+            btn.classList.add('opacity-50');
+            badge.innerText = 'RUNNING';
+            badge.className = 'px-2 py-0.5 rounded-full bg-cyan-500/20 text-[10px] text-cyan-400 font-mono animate-pulse';
+            term.innerHTML = '';
+            pBar.style.width = '20%';
+            pPct.innerText = '20%';
+
+            appendTerminal(term, '⚡ 發送備份指令至本機 Hermes Agent API...');
+
+            try {
+                const res = await fetch('/api/backup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        include_core: includeCore,
+                        include_skills: includeSkills,
+                        include_memories: includeMemories,
+                        projects: selectedProjects,
+                        exclude_heavy: excludeHeavy,
+                        retention_count: retention
+                    })
+                });
+
+                pBar.style.width = '70%';
+                pPct.innerText = '70%';
+
+                const result = await res.json();
+                if (result.logs) {
+                    result.logs.forEach(l => appendTerminal(term, l));
+                }
+
+                if (result.success) {
+                    pBar.style.width = '100%';
+                    pPct.innerText = '100%';
+                    badge.innerText = 'SUCCESS';
+                    badge.className = 'px-2 py-0.5 rounded-full bg-emerald-500/20 text-[10px] text-emerald-400 font-mono';
+                    await refreshData();
+                } else {
+                    appendTerminal(term, '❌ 備份失敗: ' + (result.error || '未知錯誤'));
+                    badge.innerText = 'FAILED';
+                    badge.className = 'px-2 py-0.5 rounded-full bg-rose-500/20 text-[10px] text-rose-400 font-mono';
+                }
+            } catch (e) {
+                appendTerminal(term, '❌ API 連線異常: ' + e.message);
+                badge.innerText = 'ERROR';
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('opacity-50');
+            }
+        }
+
+        // Trigger One-Click Restore
+        async function triggerOneClickRestore() {
+            const selectedSnapshot = document.getElementById('select-restore-snapshot').value;
+            if (!confirm(`⚠️ 警告：確定要還原 ${selectedSnapshot || '最新備份快照'} 嗎？系統將自動建立緊急快照以防回滾。`)) {
+                return;
+            }
+
+            const btn = document.getElementById('btn-execute-restore');
+            const term = document.getElementById('restore-terminal');
+            const pBar = document.getElementById('restore-progress-bar');
+            const pPct = document.getElementById('restore-pct');
+            const badge = document.getElementById('restore-status-badge');
+
+            btn.disabled = true;
+            btn.classList.add('opacity-50');
+            badge.innerText = 'RESTORING';
+            badge.className = 'px-2 py-0.5 rounded-full bg-emerald-500/20 text-[10px] text-emerald-400 font-mono animate-pulse';
+            term.innerHTML = '';
+            pBar.style.width = '30%';
+            pPct.innerText = '30%';
+
+            appendTerminal(term, '🔄 發送災難復原指令至本機 Hermes Agent API...');
+
+            try {
+                const res = await fetch('/api/restore', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        backup_id: selectedSnapshot
+                    })
+                });
+
+                pBar.style.width = '80%';
+                pPct.innerText = '80%';
+
+                const result = await res.json();
+                if (result.logs) {
+                    result.logs.forEach(l => appendTerminal(term, l));
+                }
+
+                if (result.success) {
+                    pBar.style.width = '100%';
+                    pPct.innerText = '100%';
+                    badge.innerText = 'RESTORED';
+                    badge.className = 'px-2 py-0.5 rounded-full bg-emerald-500/20 text-[10px] text-emerald-400 font-mono';
+                    await refreshData();
+                } else {
+                    appendTerminal(term, '❌ 還原失敗: ' + (result.error || '未知錯誤'));
+                    badge.innerText = 'FAILED';
+                }
+            } catch (e) {
+                appendTerminal(term, '❌ API 連線異常: ' + e.message);
+                badge.innerText = 'ERROR';
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('opacity-50');
+            }
+        }
+
+        function quickRestore(dirName) {
+            switchTab('restore');
+            document.getElementById('select-restore-snapshot').value = dirName;
+            triggerOneClickRestore();
+        }
+
+        // Save Schedule
+        async function saveSchedule() {
+            const freq = document.querySelector('input[name="schedule-freq"]:checked').value;
+            const customCron = document.getElementById('input-custom-cron').value;
+            const btn = document.getElementById('btn-save-schedule');
+
+            btn.disabled = true;
+            btn.classList.add('opacity-50');
+
+            try {
+                const res = await fetch('/api/schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        frequency: freq,
+                        custom_cron: customCron
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(data.logs ? data.logs.join('\n') : '✅ 排程設定已成功套用！');
+                    await refreshData();
+                }
+            } catch (e) {
+                alert('❌ 排程設定失敗: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('opacity-50');
+            }
+        }
+
+        // GitHub Sync
+        async function triggerGitHubSync() {
+            const btn = document.getElementById('btn-sync-gh');
+            btn.disabled = true;
+            btn.innerHTML = '<i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i><span>同步中...</span>';
+            lucide.createIcons();
+
+            try {
+                const res = await fetch('/api/git-sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: 'Auto backup manifest & sync: ' + new Date().toLocaleString() })
+                });
+                const data = await res.json();
+                alert(data.logs ? data.logs.join('\n') : '✅ GitHub 同步完成！');
+            } catch (e) {
+                alert('❌ GitHub 同步錯誤: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="github" class="w-3.5 h-3.5 text-cyan-400"></i><span>同步 GitHub</span>';
+                lucide.createIcons();
+            }
+        }
+
+        function appendTerminal(termEl, text) {
+            const div = document.createElement('div');
+            div.innerText = text;
+            if (text.includes('✅') || text.includes('🎉')) div.className = 'text-emerald-400 font-bold';
+            else if (text.includes('❌') || text.includes('⚠️')) div.className = 'text-rose-400';
+            else if (text.includes('🚀') || text.includes('📦')) div.className = 'text-cyan-300';
+            else div.className = 'text-slate-300';
+            termEl.appendChild(div);
+            termEl.scrollTop = termEl.scrollHeight;
+        }
+
+        async function refreshData() {
+            await fetchStatus();
+            await fetchBackups();
+        }
+
+        // Initial Load
+        refreshData();
+    </script>
+</body>
+</html>
