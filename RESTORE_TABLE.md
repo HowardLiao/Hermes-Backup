@@ -1,6 +1,6 @@
 # 🛡️ Hermes Agent 15-Day Rolling Differential Backup & Restore Table
 
-> **最後同步時間 (Last Synced)**：`2026-11-14 03:00:56` (CST / UTC+8)
+> **最後同步時間 (Last Synced)**：`2026-11-15 03:00:57` (CST / UTC+8)
 > **保留政策 (Retention)**：嚴格保留最近 **15 天** 差異備份，過期自動輪轉清理。
 > **備份內容**：Hermes Core（狀態資料庫、設定檔、Skills、Memories、LINE Tunnel 守護架構）與全工作區 24H 差異異動。
 
@@ -10,6 +10,7 @@
 
 | 備份日期 | 備份編號 (Backup ID) | 類型 | 封裝大小 | 差異變更數 | SHA-256 (首12碼) | 一鍵還原指令 (Quick Restore Command) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **2026-11-15** | `hermes_diff_20261115_030043` | `DIFFERENTIAL` | 328.09 MB | 0 個檔案 | `273ac21634af...` | `bash scripts/restore_diff.sh hermes_diff_20261115_030043` |
 | **2026-11-14** | `hermes_diff_20261114_030043` | `DIFFERENTIAL` | 323.95 MB | 22 個檔案 | `6f33f90589fe...` | `bash scripts/restore_diff.sh hermes_diff_20261114_030043` |
 | **2026-11-13** | `hermes_diff_20261113_030043` | `DIFFERENTIAL` | 305.97 MB | 27 個檔案 | `b2b2f1cf8737...` | `bash scripts/restore_diff.sh hermes_diff_20261113_030043` |
 | **2026-11-12** | `hermes_diff_20261112_030042` | `DIFFERENTIAL` | 267.91 MB | 30 個檔案 | `c6290f685249...` | `bash scripts/restore_diff.sh hermes_diff_20261112_030042` |
@@ -23,7 +24,7 @@
 ### 1. 還原指定某一天的差異快照
 在終端機執行對應日期的還原指令：
 ```bash
-bash /Users/howard/Desktop/HermesAgent/PortFilio/Hermes-Backup/scripts/restore_diff.sh hermes_diff_20261114_030043
+bash /Users/howard/Desktop/HermesAgent/PortFilio/Hermes-Backup/scripts/restore_diff.sh hermes_diff_20261115_030043
 ```
 
 ### 2. 一鍵還原至最新快照 (Default Latest)
